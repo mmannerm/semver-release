@@ -1,0 +1,81 @@
+#! /usr/bin/env bash
+# @brief Automatic Semantic Versioning based on Git merge commits.
+set -eo pipefail
+
+if [ "${DEBUG}" ]; then
+    set -x
+fi
+
+# @description Parse semantic version string into components.
+#
+# $?: 0, if parsing the version string was successful
+# @arg $1 string version to parse
+# @arg $2 *integer ref to contain major
+# @arg $3 *integer ref to contain minor
+# @arg $4 *integer ref to contain patch
+# @arg $5 *string ref to contain prerelease
+# @arg $6 *string ref to contain build
+#
+# @exitcode 0 If version string was successfully parsed.
+# @exitcode 1 If version string was not a semantic version.
+# @exitcode 2 If wrong number of arguments was given to function.
+parse_version() {
+    if [ "$#" -ne 6 ]; then
+        return 2
+    fi
+
+    local -r _version=$1
+    local -n _major=$2 _minor=$3 _patch=$4 _prerelease=$5 _build=$6
+
+    if [[ $_version =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-?([0-9a-zA-Z\.-]*)\+?([0-9a-zA-Z\.-]*)$ ]]; then
+        _major=${BASH_REMATCH[1]}
+        _minor=${BASH_REMATCH[2]}
+        _patch=${BASH_REMATCH[3]}
+        _prerelease=${BASH_REMATCH[4]}
+        _build=${BASH_REMATCH[5]}
+        return 0
+    fi
+
+    return 1
+}
+
+# @description Retrieve latest tag for current Git branch.
+#
+# Defaults to "0.0.0" if no tags found.
+#
+# @arg $1 string ref to contain version string
+#
+# @exitcode 2 If wrong number of arguments was given to function.
+get_version() {
+    if [ "$#" -ne 1 ]; then
+        return 2
+    fi
+
+    local -n _version=$1
+    _version=$(git describe --abbrev=0 --tags --first-parent 2>/dev/null || echo "0.0.0")
+}
+
+# @description Check if latest commit in HEAD has a tag.
+#
+# @noargs
+#
+# @exitcode 0 If the latest commit in HEAD has a tag.
+# @exitcode 1 If the latest commit in HEAD does not have a tag.
+has_tag() {
+    [ ! -z "$(git describe --contains $(git rev-parse HEAD) 2>/dev/null)" ]
+}
+
+main() {
+    declare version
+    declare -i major minor patch
+    declare prerelease build
+
+    get_version version
+    parse_version "${version}" major minor patch prerelease build
+
+    printf "version=${version} major=${major} minor=${minor} patch=${patch} prerelease=${prerelease} build=${build}"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main
+fi
