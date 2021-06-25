@@ -10,11 +10,11 @@ fi
 #
 # $?: 0, if parsing the version string was successful
 # @arg $1 string version to parse
-# @arg $2 *integer ref to contain major
-# @arg $3 *integer ref to contain minor
-# @arg $4 *integer ref to contain patch
-# @arg $5 *string ref to contain prerelease
-# @arg $6 *string ref to contain build
+# @arg $2 integer nameref to contain major
+# @arg $3 integer nameref to contain minor
+# @arg $4 integer nameref to contain patch
+# @arg $5 string nameref to contain prerelease
+# @arg $6 string nameref to contain build
 #
 # @exitcode 0 If version string was successfully parsed.
 # @exitcode 1 If version string was not a semantic version.
@@ -40,10 +40,10 @@ parse_version() {
 }
 
 # @description Retrieve latest tag for current Git branch.
-#
+#deca
 # Defaults to "0.0.0" if no tags found.
 #
-# @arg $1 string ref to contain version string
+# @arg $1 string nameref to contain version string
 #
 # @exitcode 2 If wrong number of arguments was given to function.
 get_version() {
@@ -65,17 +65,82 @@ has_tag() {
     [ ! -z "$(git describe --contains $(git rev-parse HEAD) 2>/dev/null)" ]
 }
 
+# @description Increase semantic version components based on scope.
+#
+# @arg $1 string scope to increase [major, minor or patch]
+# @arg $2 integer nameref that contains major
+# @arg $3 integer nameref that contains minor
+# @arg $4 integer nameref that contains patch
+#
+# @exitcode 0 If semantic version was successfully incremented.
+# @exitcode 1 If invalid scope string.
+# @exitcode 2 If wrong number of arguments was given to function.
+next_version() {
+    if [ "$#" -ne 4 ]; then
+        return 2
+    fi
+
+    local -r _scope=$1
+    local -n _major=$2 _minor=$3 _patch=$4
+
+    case "${_scope}" in
+        major)
+            ((_major=_major+1))
+            _minor=0
+            _patch=0
+            ;;
+        minor)
+            ((_minor=_minor+1))
+            _patch=0
+            ;;
+        patch)
+            ((_patch=_patch+1))
+            ;;
+        *)
+            return 1
+    esac
+}
+
+usage() {
+cat << EOF
+Usage: $0 [-h] [-s <scope>]
+  -h                       Display this help and exit
+  -s (major|minor|patch)   Scope of the next semantic version's increase
+EOF
+exit 1
+}
+
 main() {
     declare version
     declare -i major minor patch
     declare prerelease build
+    declare scope="patch"
+    local opt
+
+    while getopts "s:h" opt; do
+        case "${opt}" in
+            s)
+                scope=${OPTARG,,}
+                if ! [[ "${scope}" == "major" || "${scope}" == "minor" || "${scope}" == "patch" ]]; then
+                    echo "Invalid scope: ${scope}"
+                    echo
+                    usage
+                fi
+            ;;
+            h)
+                usage
+            ;;
+        esac
+    done
+    shift $((OPTIND-1))
 
     get_version version
     parse_version "${version}" major minor patch prerelease build
+    next_version "${scope}" major minor patch
 
-    printf "version=${version} major=${major} minor=${minor} patch=${patch} prerelease=${prerelease} build=${build}"
+    printf "${major}.${minor}.${patch}\n"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main
+    main $*
 fi
