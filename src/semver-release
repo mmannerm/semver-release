@@ -40,7 +40,6 @@ parse_version() {
 }
 
 # @description Retrieve latest tag for current Git branch.
-#deca
 # Defaults to "0.0.0" if no tags found.
 #
 # @arg $1 string nameref to contain version string
@@ -156,37 +155,133 @@ auto_scope() {
 # get change log since last tag 
 
 usage() {
-cat << EOF
-Usage: $0 [-h] [-s <scope>]
+cat << EOF >&2
+Usage: $0 [-h] [-d] [-s <scope>] [publish-method] [publish-options]
   -h                            Display this help and exit
-  -s (auto|major|minor|patch)   Scope of the next semantic version's increase. Default is "auto".
+  -d                            Dry-run only
+  -s (auto|major|minor|patch)   Scope of the next semantic version's increase.
+                                Default is "auto".
+
+  The default publish method is stdout.
+
+Publish Methods:
+  stdout
+        Print the next version to stdout and exit. This is default publish
+        method.
 EOF
-exit 1
+usage_tag
+}
+
+usage_tag() {
+cat << EOF >&2
+  tag [-s|-u <keyid>] [-m <msg>|-F <file>]
+        Publish the next version by creating a git tag and pushing to remote.
+
+    -s                          Make a GPG-signed tag, using the default email
+                                address' key.
+                                Default is unsigned, annotated tag object.
+    -u <keyid>                  Make a GPG-signed tag, using the given key.
+                                Default is unsigned, annotated tag object.
+                                Takes presedence over -s.
+    -m <msg>                    Override the generated tag message with given
+                                message.
+    -F <file>                   Override the generated tag message with given
+                                file. Takes presedence over -m.
+EOF
 }
 
 main() {
-    declare version
-    declare -i major minor patch
-    declare prerelease build
-    declare scope="auto"
-    local opt
+    local version
+    local -i major minor patch
+    local prerelease build
+    local scope="auto"
+    local publish="stdout"
+    local opt tag dryrun
 
-    while getopts "s:h" opt; do
+    while getopts ":hs:d" opt; do
         case "${opt}" in
             s)
-                scope=${OPTARG,,}
+                scope="${OPTARG,,}"
                 if ! [[ "${scope}" == "auto" || "${scope}" == "major" || "${scope}" == "minor" || "${scope}" == "patch" ]]; then
-                    echo "Invalid scope: ${scope}"
-                    echo
+                    printf "Invalid argument for scope: ${scope}\n\n"
                     usage
+                    exit 1
                 fi
+            ;;
+            d)
+                dryrun=1
             ;;
             h)
                 usage
+                exit 1
+            ;;
+            \?)
+                printf "Invalid option: $OPTARG\n\n" 1>&2
+                usage
+                exit 1
+            ;;
+            : )
+                printf "Invalid option: $OPTARG requires an argument\n\n" 1>&2
+                usage
+                exit 1
             ;;
         esac
     done
     shift $((OPTIND-1))
+    OPTIND=0
+
+    if [[ $# -gt 0 ]]; then
+        case "${1}" in
+            tag)
+                local tag_type="unsigned" keyid msg file
+
+                shift
+                publish="tag"
+
+                while getopts ":hasu:m:F:" opt; do
+                    case "${opt}" in
+                        s)
+                            tag_type="signed"
+                        ;;
+                        u)
+                            keyid="${OPTARG}"
+                        ;;
+                        m)
+                            msg="${OPTARG}"
+                        ;;
+                        F)
+                            file="${OPTARG}"
+                        ;;
+                        h)
+                            usage_tag
+                            exit 1
+                        ;;
+                        \?)
+                            printf "tag: Invalid option: $OPTARG\n\n" 1>&2
+                            usage_tag
+                            exit 1
+                        ;;
+                        : )
+                            printf "tag: Invalid option: $OPTARG requires an argument\n\n" 1>&2
+                            usage_tag
+                            exit 1
+                        ;;
+                    esac
+                done
+                shift $((OPTIND-1))
+            ;;
+            *)
+                printf "Invalid publish method: ${1}\n\n" 1>&2
+                usage
+                exit 1
+            ;;
+        esac
+    fi
+
+    if has_tag; then
+        printf "HEAD already has a tag.\n" 1>&2
+        exit 1
+    fi
 
     get_version version
     parse_version "${version}" major minor patch prerelease build
@@ -195,9 +290,49 @@ main() {
     fi
     next_version "${scope}" major minor patch
 
-    printf "${major}.${minor}.${patch}\n"
+    tag="${major}.${minor}.${patch}"
+
+    case "${publish}" in
+        stdout)
+            printf "${tag}\n"
+        ;;
+        tag)
+            local -a _args
+            local current_branch remote_branch
+
+            if [[ ! -z "${keyid}" ]]; then
+                _args+=(-u ${keyid})
+            elif [[ "${tag_type}" == "signed" ]]; then
+                _args+=(-s)
+            else
+                _args+=(-a --no-sign)
+            fi
+
+            if [[ ! -z "${file}" ]]; then
+                _args+=(-F ${file})
+            elif [[ ! -z "${msg}" ]]; then
+                _args+=(-m ${msg})
+            else
+                _args+=(-m "Release ${major}.${minor}.${patch} by semver-release")
+            fi
+
+            if [[ ${dryrun} ]]; then
+                printf "> git tag %s %s HEAD\n" "${_args[*]}" "${tag}"
+            else
+                git tag "${_args[@]}" ${tag} HEAD
+            fi
+
+            current_branch=$(git name-rev --name-only --exclude="tags/*" HEAD)
+            remote_branch=$(git config branch.${current_branch}.remote)
+            if [[ ${dryrun} ]]; then
+                printf "> git push \"${remote_branch}\" \"${tag}\"\n"
+            else
+                git push "${remote_branch}" "${tag}"
+            fi
+        ;;
+    esac
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main $*
+    main "$@"
 fi
