@@ -114,7 +114,12 @@ next_version() {
 #
 # @exitcode 0 If scope was successfully determined
 # @exitcode 1 If no commits found
+# @exitcode 2 If wrong number of arguments was given to function.
 auto_scope() {
+    if [ "$#" -ne 1 ]; then
+        return 2
+    fi
+
     local -n _scope=$1
     local _new_scope _last_tag _c _branch
     local -a _merged_parents
