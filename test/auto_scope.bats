@@ -25,6 +25,15 @@ verify_auto_scope() {
     assert_equal $status 1
 }
 
+@test "auto_scope no arguments" {
+    cd $BATS_TEST_TMPDIR/
+
+    source ${SEMVER_SCRIPT}
+    run auto_scope
+
+    assert_equal $status 2
+}
+
 @test "auto_scope no commits" {
     local scope
 
