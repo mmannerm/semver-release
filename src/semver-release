@@ -101,11 +101,60 @@ next_version() {
     esac
 }
 
+# @description Determine next scope from merge branch names since last tag.
+#
+# The following rules are applied when the branch name starts with
+# - major: major release
+# - minor|feature: minor release
+# - bug|patch|fix: patch release
+#
+# If multiple merge commits exist, the precedence is major > minor > patch.
+#
+# @arg $1 string nameref to scope
+#
+# @exitcode 0 If scope was successfully determined
+# @exitcode 1 If no commits found
+auto_scope() {
+    local -n _scope=$1
+    local _new_scope _last_tag _c _branch
+    local -a _merged_parents
+
+    get_version _last_tag
+    # If last tag is 0.0.0, assume no tag and start from the first commit of the branch
+    [[ "${_last_tag}" == "0.0.0" ]] && _last_tag=$(git rev-list --first-parent --max-parents=0 HEAD 2>/dev/null || true)
+
+    [[ -z "${_last_tag}" ]] && return 1
+
+    # Get all 2nd parent hashes of merge commits
+    _merged_parents=$(git log --merges --format="%P" ${_last_tag}..HEAD | cut -d ' ' -f2)
+    for _c in ${_merged_parents}; do
+        # Get name of the branch where merge originated. This only works only for a short while after merge
+        _branch=$(git name-rev --name-only --exclude="tags/*" ${_c})
+
+        # determine scope of the branch
+        if [[ ${_branch} =~ ^(major) ]]; then
+            _new_scope="major"
+        fi
+        if [[ ${_branch} =~ ^(feature)|(minor) ]]; then
+            [[ "${_new_scope}" != "major" ]] && _new_scope="minor"
+        fi
+        if [[ ${_branch} =~ ^(bug)|(patch)|(fix) ]]; then
+            [[ "${_new_scope}" != "major" && "${_new_scope}" != "minor" ]] && _new_scope="patch"
+        fi
+    done
+
+    _scope=${_new_scope:-minor}
+}
+
+# current branch (git symbolic-ref --short HEAD)
+# determine combined scope of all merge commits since last tag (or first commit)
+# get change log since last tag 
+
 usage() {
 cat << EOF
 Usage: $0 [-h] [-s <scope>]
-  -h                       Display this help and exit
-  -s (major|minor|patch)   Scope of the next semantic version's increase
+  -h                            Display this help and exit
+  -s (auto|major|minor|patch)   Scope of the next semantic version's increase. Default is "auto".
 EOF
 exit 1
 }
@@ -114,14 +163,14 @@ main() {
     declare version
     declare -i major minor patch
     declare prerelease build
-    declare scope="patch"
+    declare scope="auto"
     local opt
 
     while getopts "s:h" opt; do
         case "${opt}" in
             s)
                 scope=${OPTARG,,}
-                if ! [[ "${scope}" == "major" || "${scope}" == "minor" || "${scope}" == "patch" ]]; then
+                if ! [[ "${scope}" == "auto" || "${scope}" == "major" || "${scope}" == "minor" || "${scope}" == "patch" ]]; then
                     echo "Invalid scope: ${scope}"
                     echo
                     usage
@@ -136,6 +185,9 @@ main() {
 
     get_version version
     parse_version "${version}" major minor patch prerelease build
+    if [[ "${scope}" == "auto" ]]; then
+        auto_scope scope
+    fi
     next_version "${scope}" major minor patch
 
     printf "${major}.${minor}.${patch}\n"
