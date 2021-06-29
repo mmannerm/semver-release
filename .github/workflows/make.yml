@@ -13,5 +13,7 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+    - name: sub-modules
+      run: git submodule update
     - name: make
       run: make
