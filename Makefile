@@ -17,6 +17,9 @@ test: $(testdir)/*.bats
 .PHONY: docs
 docs: semver-release.md
 
+update:
+	git submodule update --recursive --remote
+
 # https://github.com/reconquest/shdoc
 semver-release.md: $(srcdir)/semver-release
 	shdoc < $< > $@
